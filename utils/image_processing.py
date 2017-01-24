@@ -25,8 +25,7 @@ class distortionCorrector(object):
             print('Loading saved calibration file...')
             self.mtx, self.dist = pickle.load( open( fname, "rb" ) )
         else:
-            print('Mtx and dist matrix missing. Please ca
-                  ll .fit function.')
+            print('Mtx and dist matrix missing. Please call .fit function.')
         return
 
     def fit(self, images):

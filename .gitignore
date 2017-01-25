@@ -2,3 +2,6 @@ playground.ipynb
 .ipynb_checkpoints/
 calibration_wide
 __pycache__/
+output_images/
+output_movies/
+*.pyc

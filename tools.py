@@ -6,82 +6,127 @@ import os
 import glob
 
 
-class Thresholder(object):
+
+class LaneHistogramFitter:
+    """Takes in a bitmap image of two lanes and  uses an adaptive histogram gitting method to 
+    return the x, y coordinates of each of the lanes.
+    """
+    def __init__(self, g):
+        return
+
+
+ 
+class ImageThresholder:
+    """
+    The ImageThresholder takes in an rgb image and spits out a thresholded image 
+    using a variety of techniques. Filtering techniques aim to extract the yellow and 
+    white traffic lines for a variety of conditions.
+    """
 
     def __init__(self):
+        return
 
+    def __generate_colors_spaces(self):
+        self.hsv = cv2.cvtColor(self.rgb, cv2.COLOR_RGB2HSV)
+        self.yuv = cv2.cvtColor(self.rgb, cv2.COLOR_RGB2YUV)
+        self.gray = cv2.cvtColor(self.rgb, cv2.COLOR_RGB2GRAY)
+
+    def get_thresholded_image(self, rgb):
+        self.rgb = rgb
+        self.thresh = np.zeros((self.rgb.shape[0], self.rgb.shape[1]), dtype=np.uint8)
+        self.__generate_colors_spaces()
+        self.__add_yellow_pixels()
+        self.__add_white_pixels()
+        self.__add_sobel_thresholds()
+        self.__ignore_shadows()
+        return self.thresh
+
+    def __add_yellow_pixels(self):
+        """Yellow pixels are identified through a band-pass filter in the HSV
+        (hue, saturation, value/brightness) space.
         """
-        threshold_img takes in an image and returns a single channel 
-        binary image detection the edges. 
+        lower  = np.array([ 0, 80, 200])
+        upper = np.array([ 40, 255, 255])
+        yellows = np.array(cv2.inRange(self.hsv, lower, upper))
+        self.thresh[yellows > 0] = 1
 
+    def __add_white_pixels(self):
+        """White filtering method from "Real-Time Lane Detection and Rear-End 
+        Collision Warning SystemOn A Mobile Computing Platform", Tang et.al., 2015
         """
-        self.s_thresh = (170, 255)
-        self.sx_thresh = (20, 100)
+        y = self.yuv[:,:,0]
+        whites = np.zeros_like(y)
+        bits = np.where(y  > 100)  # was 175
+        whites[bits] = 1
+
+        # Define a filter kernel to find the white pixels.
+        kernel = np.ones((11,11),np.float32)/(1-11*11)
+        kernel[5,5] = 1.0
+        mask2 = cv2.filter2D(y,-1,kernel)
+        whites[mask2 < 5] = 0
+        self.thresh = self.thresh | whites 
+
+    def __add_sobel_thresholds(self):
+        """The green channel in an rgb image, and the gray image are 
+        good candidates for finding edges. As talked about in class,
+        and by experimentaion.
+        """
+        green = self.__abs_sobel_thresh(self.rgb[:,:,1])
+        shadows = self.__abs_sobel_thresh(self.gray, thresh_min=10, thresh_max=64)
+        self.thresh = self.thresh | green | shadows
+
+    def __abs_sobel_thresh(self, gray, orient='x', thresh_min=20, thresh_max=100):
+        """Apply a Sobel filter to find edges, scale the results
+        from 1-255 (0-100%), then use a band-pass filter to create a mask
+        for values in the range [thresh_min, thresh_max].
+        """
+        sobel = cv2.Sobel(gray, cv2.CV_64F, (orient=='x'), (orient=='y'))
+        abs_sobel = np.absolute(sobel)
+        max_sobel = max(1,np.max(abs_sobel))
+        scaled_sobel = np.uint8(255*abs_sobel/max_sobel)
+        binary_output = np.zeros_like(scaled_sobel)
+        binary_output[(scaled_sobel >= thresh_min) & (scaled_sobel <= thresh_max)] = 1
+        return binary_output
+
+    def __ignore_shadows(self):
+        """Find brighter spots on the road and ignore the really dark areas.
+        """
+        bits = np.zeros_like(self.gray)
+        thresh = np.mean(self.gray)
+        bits[self.gray > thresh] = 1
+        self.thresh = self.thresh & bits
 
 
-    def threshold_img(self, img):
-        
-        hls = np.copy(img)
-        hls = self.__get_hls_transform(img)
-        s_channel = self.__get_s_channel(hls)
 
+class DistortionCorrector:    
+    """Takes in path to calibration files as string.
 
-        scaled_sobel = self.__get_scaled_sobelx(s_channel)
+    Params:
+    self.nx = How many inside corners in chess boards (y-direction)
+    self.ny = How many inside corner in chess boards (x-direction)
+    calibration_folder_path = path to calibration images.
 
-        # Threshold x gradient
-        thresh_min = self.sx_thresh[0]
-        thresh_max = self.sx_thresh[1]
-        sxbinary = np.zeros_like(scaled_sobel)
-        sxbinary[(scaled_sobel >= thresh_min) & (scaled_sobel <= thresh_max)] = 1
+    Methods:
 
-        # Threshold color channel
-        s_thresh_min = self.s_thresh[0]
-        s_thresh_max = self.s_thresh[1]
-        s_binary = np.zeros_like(s_channel)
-        s_binary[(s_channel >= s_thresh_min) & (s_channel <= s_thresh_max)] = 1
+    fit: Calibrates the distorsionCorrector with array of images [None, width, height, channels]
+    undistort: takes in an image, and outputs undistorted image
+    test: takes in an image, and displays undistored image alongside original.
 
-        # Combine the two binary thresholds
-        combined_binary = np.zeros_like(sxbinary)
-        combined_binary[(s_binary == 1) | (sxbinary == 1)] = 1
+    -----------
+    In this project it is already fitted, however it can be used for other projects.
 
-        return combined_binary
+    To Fit:
 
-    def __get_scaled_sobelx(self,img):
-        """Only takes in one channel."""
+    # cal_images_paths = glob.glob('./camera_cal/cal*.jpg')
+    # cal_images = []
+    # for fname in cal_images_paths:
+    #     cal_images.append(mpimg.imread(fname))
+    # distCorrector.fit(cal_images)
 
-        sobelx = cv2.Sobel(img, cv2.CV_64F, 1, 0) # Take the derivative in x
-        
-         # Absolute x derivative to accentuate lines away from horizontal
-        abs_sobelx = np.absolute(sobelx)
-        scaled_sobel = np.uint8(255*abs_sobelx/np.max(abs_sobelx))
-
-        return scaled_sobel
-
-    def __get_hls_transform(self, img):
-        return cv2.cvtColor(img, cv2.COLOR_RGB2HLS)
-
-    def __get_s_channel(self, hls):
-        return hls[:,:,2]
-
-
-class distortionCorrector(object):    
-    
+    """  
     def __init__(self, calibration_folder_path):
-        """Takes in path to calibration files as string.
 
-        Params:
-        self.nx = How many inside corners in chess boards (y-direction)
-        self.ny = How many inside corner in chess boards (x-direction)
-        calibration_folder_path = path to calibration images.
-
-        Methods:
-
-        fit: Calibrates the distorsionCorrector with array of images [None, width, height, channels]
-        undistort: takes in an image, and outputs undistorted image
-        test: takes in an image, and displays undistored image alongside original.
-        """
-
-        # Set nx and ny according to how many inside corners in chess boards.
+        # Set nx and ny according to how many inside corners in chess boards images.  
         self.nx = 9
         self.ny = 6
         self.mtx = []
@@ -94,11 +139,13 @@ class distortionCorrector(object):
             print('Loading saved calibration file...')
             self.mtx, self.dist = pickle.load( open( fname, "rb" ) )
         else:
-            print('Mtx and dist matrix missing. Please call .fit function.')
+            print('Mtx and dist matrix missing. Please call fit distortionCorrector')
         return
 
     def fit(self, images):
-        """Calibrates using chess images from camera_cal folder. Saves mtx and dist in TEST_FOLDER"""
+        """Calibrates using chess images from camera_cal folder. 
+        Saves mtx and dist in calibration_folder_path
+        """
         
         cname = self.cal_folder + 'calibration.p'
         if  os.path.isfile(cname):
@@ -107,12 +154,9 @@ class distortionCorrector(object):
 
         print("Computing camera calibration...")
 
-
-        # prepare object points, like (0,0,0), (1,0,0), (2,0,0) ....,(6,5,0)
         objp = np.zeros((self.ny*self.nx,3), np.float32)
         objp[:,:2] = np.mgrid[0:self.nx,0:self.ny].T.reshape(-1,2)
 
-        # Arrays to store object points and image points from all the images.
         objpoints = []
         imgpoints = [] 
 
@@ -120,11 +164,7 @@ class distortionCorrector(object):
         # Step through the list and search for chessboard corners
         for img in images:
             gray = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
-
-            # Find the chessboard corners
             ret, corners = cv2.findChessboardCorners(gray, (self.nx,self.ny), None)
-
-            # If found, add object points, image points
             if ret == True:
                 objpoints.append(objp)
                 imgpoints.append(corners)
@@ -133,7 +173,6 @@ class distortionCorrector(object):
             raise ValueError('Most likely the self.nx and self.ny are not set correctly')
 
         img = images[0]
-
 
         # Calibrate the camera and get mtx, and dist matricies.
         _, self.mtx, self.dist, _, _ = cv2.calibrateCamera(objpoints,

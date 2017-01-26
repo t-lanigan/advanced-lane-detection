@@ -44,7 +44,8 @@ class GlobalObjects:
 
 
     def __set_hyper_parameters(self):
-        self.img_size   = (640, 360) #(x,y) values for resized img
+        self.img_size   = (640, 360) # (x,y) values for resized img
+
         return
 
     def __set_kernels(self):
@@ -84,6 +85,7 @@ class LaneFinder(object):
         self.g             = GlobalObjects()        
         self.thresholder   = tools.ImageThresholder()
         self.distCorrector = tools.DistortionCorrector(self.g.camera_cal_folder)
+        self.histFitter    = tools.LaneHistogramFitter(self.g)
 
         return
 
@@ -193,7 +195,7 @@ class LaneFinder(object):
                 ax = fig.add_subplot(4,2,i+1)
                 img = mpimg.imread(path)
                 img = self.__image_pipeline(img)
-                plt.imshow(img, cmap='gray')
+                plt.imshow(img)
                 plt.title(path.split('/')[1])
                 ax.xaxis.set_visible(False)
                 ax.yaxis.set_visible(False)

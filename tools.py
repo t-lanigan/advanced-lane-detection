@@ -12,7 +12,44 @@ class LaneHistogramFitter:
     return the x, y coordinates of each of the lanes.
     """
     def __init__(self, g):
-        return
+
+        self.g = g
+
+    def histogram_fit(self, img):
+
+        # Use intensity histograms in the x (vertical) direction to detect
+        # potential lane markers on the left and ride side of the image.
+        # Feed these to our makers who will figure out if they're good and
+        # compute a moving average, which we'll use for guidance.
+        #
+        edges = img
+        h = self.smooth(np.mean(edges[np.int(edges.shape[0]*self.g.n_hist_cutoff):,:], axis=0))
+        b = self.lane_boundaries(h)
+        self.pixels, left_fit, right_fit = self.fit_line_to_frame(b)
+        self.left.update_history(left_fit)
+        self.right.update_history(right_fit)
+
+    def smooth(self, x, window_len=32):
+        # We apply a 32x32 hanning filter to smooth our noisy 1-D
+        # histogram of pixel intensity.  This helps find peaks for lanes.
+        w = np.hanning(window_len)
+        s = np.r_[x[window_len-1:0:-1],x,x[-1:-window_len:-1]]
+        return np.convolve(w/w.sum(),s,mode='valid')
+
+    def lane_boundaries(self, h):
+        # Given an intensity histogram h, find the peaks on left an right,
+        # then the window of intensity on either side of the peak that exceeds
+        # a noise threshold.
+        b = LaneBoundaries()
+        midpoint = int(len(h)/2)
+        b.l_lo, b.l_hi = self.g.peak_window(h, np.argmax(h[0:midpoint]))
+        b.r_lo, b.r_hi = self.g.peak_window(h, midpoint+np.argmax(h[midpoint:]))
+        return b
+
+
+
+
+
 
 
  

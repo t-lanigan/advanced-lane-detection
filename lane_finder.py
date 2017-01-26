@@ -44,7 +44,7 @@ class GlobalObjects:
 
 
     def __set_hyper_parameters(self):
-        self.img_size   = (1280, 720) # (x,y) values for resized img (cv2 uses this)
+        self.img_size   = (1280, 720) # (x,y) values for img size (cv2 uses this)
         self.img_shape  = (self.img_size[1], self.img_size[0]) # (y,x) As numpy spits out
         return
 
@@ -93,7 +93,9 @@ class LaneFinder(object):
         self.g             = GlobalObjects()        
         self.thresholder   = tools.ImageThresholder()
         self.distCorrector = tools.DistortionCorrector(self.g.camera_cal_folder)
-        self.histFitter    = tools.LaneHistogramFitter(self.g)
+        self.histFitter    = tools.LaneHistogramFitter()
+        self.leftLane      = tools.Line()
+        self.rightLane     = tools.Line()
 
         return
 
@@ -101,18 +103,20 @@ class LaneFinder(object):
         """The pipeline for processing images. Globals g are added to functions that need
         access to global variables.
         """
-        resized     = self.__resize_image(img, self.g)
+        resized     = self.__resize_image(img)
         undistorted = self.__correct_distortion(resized)
-        enhanced    = self.__enhance_image(undistorted, self.g)
-        warped      = self.__warp_image_to_biv(enhanced)
+        warped      = self.__warp_image_to_biv(undistorted)
         thresholded = self.__threshold_image(warped)
-        # bot_masked  = self.__mask_region(thresholded, self.g.bottom_clip)
 
+        leftline    = self.histFitter.detect_lines(thresholded, self.leftLane, 'left')
+        rightline   = self.histFitter.detect_lines(thresholded, self.rightLane, 'right')
+        lines       = {'left_line': leftline, 'right_line': rightline }
+        result      = self.histFitter.draw_lanes(undistorted, thresholded, lines, self.g.M_inv)
 
+        enhanced    = self.__enhance_image(result)
       
-        result = warped
         
-        return result
+        return enhanced
 
     def __mask_region(self, img, vertices):
         """Masks a region specified by clockwise vertices.
@@ -127,7 +131,7 @@ class LaneFinder(object):
         masked_image = cv2.bitwise_and(img, mask)
         return masked_image 
 
-    def __enhance_image(self, img, g):
+    def __enhance_image(self, img):
         """
         Enhances/sharpens the image using a clahe kernel
         See https://en.wikipedia.org/wiki/Adaptive_histogram_equalization
@@ -140,9 +144,9 @@ class LaneFinder(object):
         img[:,:,2] = red
         return img
 
-    def __resize_image(self, img, g):
+    def __resize_image(self, img):
         """
-        Image is resized for memory purposes
+        Image is resized for memory purposes.
         """
         return cv2.resize(img, self.g.img_size, 
                           interpolation = cv2.INTER_CUBIC)
@@ -203,7 +207,7 @@ class LaneFinder(object):
                 ax = fig.add_subplot(4,2,i+1)
                 img = mpimg.imread(path)
                 img = self.__image_pipeline(img)
-                plt.imshow(img)
+                plt.imshow(img, cmap='gray')
                 plt.title(path.split('/')[1])
                 ax.xaxis.set_visible(False)
                 ax.yaxis.set_visible(False)

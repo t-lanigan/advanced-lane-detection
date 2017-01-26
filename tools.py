@@ -4,142 +4,262 @@ import matplotlib.pyplot as plt
 import pickle
 import os
 import glob
+from scipy import signal
 
+# From Udacity: Define a class to receive the characteristics of each line detection
+class Line:
+    def __init__(self):
+        # was the line detected in the last iteration?
+        self.detected = False  
+        # x values of the last n fits of the line
+        self.recent_xfitted = [] 
+        #average x values of the fitted line over the last n iterations
+        self.bestx = None     
+        #polynomial coefficients averaged over the last n iterations
+        self.best_fit = None  
+        #polynomial coefficients for the most recent fit
+        self.current_fit = [np.array([False])]  
+        #radius of curvature of the line in some units
+        self.radius_of_curvature = None 
+        #distance in meters of vehicle center from the line
+        self.line_base_pos = None 
+        #difference in fit coefficients between last and new fits
+        self.diffs = np.array([0,0,0], dtype='float') 
+        #x values for detected line pixels
+        self.allx = None  
+        #y values for detected line pixels
+        self.ally = None
 
 
 class LaneHistogramFitter:
-    """Takes in a bitmap image of two lanes and  uses an adaptive histogram gitting method to 
-    return the x, y coordinates of each of the lanes.
-    """
-    def __init__(self, g):
 
-        self.g = g
+    def __init__(self):
 
-    def histogram_fit(self, img):
+        return
 
-        # Use intensity histograms in the x (vertical) direction to detect
-        # potential lane markers on the left and ride side of the image.
-        # Feed these to our makers who will figure out if they're good and
-        # compute a moving average, which we'll use for guidance.
-        #
+    def detect_lines(self, img, line, direction="left"):
 
-def myPipeline(img):
-    ksize = 3
-    gradx = abs_sobel_thresh(img, orient='x', sobel_kernel=ksize, thresh=(10, 100))
-    grady = abs_sobel_thresh(img, orient='y', sobel_kernel=ksize, thresh=(5, 250))
-    mag_binary = mag_threshold(img, sobel_kernel=ksize, mag_thresh=(5, 100))
-    dir_binary = dir_threshold(img, sobel_kernel=ksize, thresh=(0, np.pi/2))
-    s_binary = color_threshold_hsv(img, "s", (120,255))
-    v_binary = color_threshold_yuv(img,"v", (0,105))
-    r_binary = color_threshold_rgb(img,"r", (230,255))
-    result = np.zeros_like(dir_binary)
-    result[((gradx == 1) & (grady == 1)) | ((mag_binary == 1) & (dir_binary == 1)) & ((s_binary == 1)) | ((v_binary ==1) | (r_binary == 1))] = 1
-    return result
+        #bigger numbers create smaller windows as it is calculated as a proportion to the img height
+        winWidth = 25
+        winHeight = 50 
 
+        if not line.detected:
+            histogram = np.sum(img[img.shape[0]*(.5):,0:img.shape[1]], axis=0)
+            #plt.plot(histogram)
 
+            #find two peaks first is the left and last is the right
+            #initial peak
+            peakind = signal.find_peaks_cwt(histogram, np.arange(100,200))
+            if direction == 'left':
+                peak = peakind[0]
+            else:
+                peak = peakind[-1]
+            
+            #move the sliding window across and gather the points
+            yvals = []
+            xvals = []
+            
+            for i in range(winHeight):
+                #peaks may be at the edge so we need to stop at the edge
+                if direction == 'left':
+                    if peak < winWidth:
+                        peak = winWidth
+                else:
+                    if peak >= (img.shape[1] - winWidth):
+                        peak = img.shape[1] - winWidth - 1
+                
+                for yval in range(int(img.shape[0]*((winHeight-i-1)/winHeight)), int(img.shape[0]*((winHeight-i)/winHeight))):
+                    for xval in range(peak-winWidth, peak+winWidth):
+                        if img[yval][xval] == 1.0:
+                            yvals.append(yval)
+                            xvals.append(xval)
+                #find new peaks to move the window accordingly for next iteration
+                #new peaks will be the max in the current window plus the beginning of the window...
+                
+                histogram = np.sum(img[img.shape[0]*((winHeight-i-1)/winHeight):img.shape[0]*((winHeight-i)/winHeight),peak-winWidth:peak+winWidth], axis=0)
+                if len(signal.find_peaks_cwt(histogram, np.arange(100,200))) > 0:
+                    peak = np.amax(signal.find_peaks_cwt(histogram, np.arange(100,200))) + (peak-winWidth)
+                else: #look in bigger window
+                    winWidthBig = 100
+                    histogram = np.sum(img[img.shape[0]*((winHeight-i-1)/winHeight):img.shape[0]*((winHeight-i)/winHeight),peak-winWidthBig:peak+winWidthBig], axis=0)
+                    if len(histogram > 0):
+                        if len(signal.find_peaks_cwt(histogram, np.arange(100,200))) > 0:
+                            peak = np.amax(signal.find_peaks_cwt(histogram, np.arange(100,200))) + (peak-winWidthBig)
 
+            yvals = np.asarray(yvals)
+            xvals = np.asarray(xvals)
+           
+            line.allx = xvals
+            line.ally = yvals
+            
+            # Fit a second order polynomial to lane line
+            fit = np.polyfit(yvals, xvals, 2)
+            
+            line.current_fit = fit
+            line.best_fit = fit
+            #print(fit)
+            
+            fitx = fit[0]*yvals**2 + fit[1]*yvals + fit[2]
+            #print(fitx)
+            
+            line.recent_xfitted.append(fitx)
+            line.bestx = fitx
+            
+        else:
+            #initial peak - use previous line x
+            peak = line.bestx[0]
+            prev_line = copy(line)
+            
+            #move the sliding window across and gather the points
+            yvals = []
+            xvals = []
+            
+            for i in range(winHeight):
+                #peaks may be at the edge so we need to stop at the edge
+                if direction == 'left':
+                    if int(peak) < winWidth:
+                        peak = winWidth
+                else:
+                    if int(peak) >= (img.shape[1] - winWidth):
+                        peak = img.shape[1] - winWidth - 1
+                        
+                for yval in range(int(img.shape[0]*((winHeight-i-1)/winHeight)), int(img.shape[0]*((winHeight-i)/winHeight))):
+                    for xval in range(int(peak-winWidth), int(peak+winWidth)):
+                        if img[yval][xval] == 1.0:
+                            yvals.append(yval)
+                            xvals.append(xval)
+                #use bestx to keep going over the line
+                peak = line.bestx[(i + 1)%len(line.bestx)]
 
+            yvals = np.asarray(yvals)
+            xvals = np.asarray(xvals)
+            
+            line.allx = xvals
+            line.ally = yvals
+            
+            # Fit a second order polynomial to lane line
+            fit = np.polyfit(yvals, xvals, 2)
+            line.current_fit = fit
+            fitx = fit[0]*yvals**2 + fit[1]*yvals + fit[2]
+            
+            isOk = self.__check_detection(prev_line, line)
+            if isOk:
+                if len(line.recent_xfitted) > 10:
+                    #remove the first element
+                    line.recent_xfitted.pop(0)
+                    line.recent_xfitted.append(fitx)
+                    line.bestx = fitx
+                    line.best_fit = fit
+            else:
+                #line lost, go back to sliding window
+                line.detected = false
+            
+        return line
 
-# Function that takes image, kernel size, and threshold and returns
-# magnitude of the gradient
-def mag_threshold(img, sobel_kernel=3, mag_thresh=(0, 255)):
-    # Convert to grayscale
-    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-    # Take both Sobel x and y gradients
-    sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=sobel_kernel)
-    sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=sobel_kernel)
-    # Calculate the gradient magnitude
-    gradmag = np.sqrt(sobelx**2 + sobely**2)
-    # Rescale to 8 bit
-    scale_factor = np.max(gradmag)/255
-    gradmag = (gradmag/scale_factor).astype(np.uint8)
-    # Create a binary image of ones where threshold is met, zeros otherwise
-    binary_output = np.zeros_like(gradmag)
-    binary_output[(gradmag >= mag_thresh[0]) & (gradmag <= mag_thresh[1])] = 1
+    def __check_detection(self, prev_line, next_line):
+        # Checking that they have similar curvature
+        left_curvature = getCurvature(prev_line.allx, prev_line.ally, prev_line.current_fit )
+        right_curvature = getCurvature(next_line.allx, next_line.ally, next_line.current_fit)
+        # Checking that they are separated by approximately the right distance horizontally
+        left_x = prev_line.recent_xfitted[0][0]
+        right_x = next_line.recent_xfitted[0][0]
+        if (np.absolute(left_x - right_x) > 1000) | (np.absolute(left_curvature - right_curvature) > 100): #in pixels, not meters
+            prev_line.detected = False
+            next_line.detected = False
+            return False
 
-    # Return the binary image
-    return binary_output
+        prev_line.detected = True #in case these are different lines that are being compared
+        next_line.detected = True
+        return True
 
-#function to threshold HSV color spectrum in an image for a given range
-def color_threshold_hsv(img, channel="s", thresh=(170,255)):
-    img = np.copy(img)
-    # Convert to HSV color space and separate the V channel
-    hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HLS).astype(np.float)
-    h_channel = hsv[:,:,0]
-    l_channel = hsv[:,:,1]
-    s_channel = hsv[:,:,2]
-    
-    if channel == "h":
-        target_channel = h_channel
-    elif channel == "l":
-        target_channel = l_channel
-    else:
-        target_channel = s_channel
-    
-    # Threshold color channel
-    binary_output = np.zeros_like(target_channel)
-    binary_output[(target_channel >= thresh[0]) & (target_channel <= thresh[1])] = 1
-    
-    return binary_output
+        # Define y-value where we want radius of curvature
+    # I'll choose the maximum y-value, corresponding to the bottom of the image
+    def __get_curvature(self, line_x, line_y, fit):
+        
+        y_eval = np.max(line_y)
+        curverad = ((1 + (2*fit[0]*y_eval + fit[1])**2)**1.5) \
+                                     /np.absolute(2*fit[0])
+        
+        # Define conversions in x and y from pixels space to meters
+        ym_per_pix = 30/720 # meters per pixel in y dimension
+        xm_per_pix = 3.7/700 # meteres per pixel in x dimension
 
-#function to threshold RGB color spectrum in an image for a given range
-def color_threshold_rgb(img, channel="r", thresh=(170,255)):
-    img = np.copy(img)
-    r_channel = img[:,:,0]
-    g_channel = img[:,:,1]
-    b_channel = img[:,:,2]
-    
-    if channel == "r":
-        target_channel = r_channel
-    elif channel == "g":
-        target_channel = g_channel
-    else:
-        target_channel = b_channel
-    
-    # Threshold color channel
-    binary_output = np.zeros_like(target_channel)
-    binary_output[(target_channel >= thresh[0]) & (target_channel <= thresh[1])] = 1
-    
-    return binary_output
-    
-#function to threshold HSV color spectrum in an image for a given range
-def color_threshold_yuv(img, channel="v", thresh=(0,255)):
-    img = np.copy(img)
-    # Convert to YUV color space and separate the V channel
-    yuv = cv2.cvtColor(img, cv2.COLOR_RGB2YUV).astype(np.float)
-    y_channel = yuv[:,:,0]
-    u_channel = yuv[:,:,1]
-    v_channel = yuv[:,:,2]
-    
-    if channel == "y":
-        target_channel = y_channel
-    elif channel == "u":
-        target_channel = u_channel
-    else:
-        target_channel = v_channel
-    
-    # Threshold color channel
-    binary_output = np.zeros_like(target_channel)
-    binary_output[(target_channel >= thresh[0]) & (target_channel <= thresh[1])] = 1
-    
-    return binary_output
+        fit_cr = np.polyfit(line_y*ym_per_pix, line_x*xm_per_pix, 2)
+        
+        curverad = ((1 + (2*fit_cr[0]*y_eval + fit_cr[1])**2)**1.5) \
+                                     /np.absolute(2*fit_cr[0])
+        
+        # Now our radius of curvature is in meters
+        #print(left_curverad, 'm', right_curverad, 'm')
+        # Example values: 3380.7 m    3189.3 m
 
-# Function to threshold gradient direction in an image for a given range and Sobel kernel
-def dir_threshold(img, sobel_kernel=3, thresh=(0, np.pi/2)):
-    # Grayscale
-    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-    # Calculate the x and y gradients
-    sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=sobel_kernel)
-    sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=sobel_kernel)
-    # Take the absolute value of the gradient direction,
-    # apply a threshold, and create a binary image result
-    absgraddir = np.arctan2(np.absolute(sobely), np.absolute(sobelx))
-    binary_output =  np.zeros_like(absgraddir)
-    binary_output[(absgraddir >= thresh[0]) & (absgraddir <= thresh[1])] = 1
+        return curverad
+        # Example values: 1163.9    1213.7
+        
+    def __get_center_difference(self, img,lines):
+        #midpoint of the lines (half the polyfill width)
+        midPoly = (lines['right_line'].bestx[0] - lines['left_line'].bestx[0]) / 2
+        #midpoint of the image (half the image length)
+        midImage = img.shape[0] / 2
+        
+        diffInPix = midImage - midPoly
+        #convert to meters
+        xm_per_pix = 3.7/700 # meteres per pixel in x dimension
+        result = diffInPix * xm_per_pix
+        lines['left_line'].line_base_pos = result
+        lines['right_line'].line_base_pos = result
+        return result
+        
 
-    # Return the binary image
-    return binary_output
+    def draw_lanes(self, undist, warped, lines, Minv):
 
+        undist = np.copy(undist)
+        img = np.copy(warped)
+        # Create an image to draw the lines on
+        warp_zero = np.zeros_like(warped).astype(np.uint8)
+        color_warp = np.dstack((warp_zero, warp_zero, warp_zero))
+
+        # Recast the x and y points into usable format for cv2.fillPoly()
+        pts_left = np.array([np.transpose(np.vstack([lines['left_line'].allx, lines['left_line'].ally]))])
+        pts_right = np.array([np.flipud(np.transpose(np.vstack([lines['right_line'].allx, lines['right_line'].ally])))])
+        pts = np.hstack((pts_left, pts_right))
+        
+        # Draw the lane onto the warped blank image
+        cv2.fillPoly(color_warp, np.int_([pts]), (0,255, 0))
+        
+        #Draw the points on the image
+        for idx,pt in enumerate(lines['left_line'].ally):
+            #cv2.circle(img,(447,63), 63, (0,0,255), -1)
+            cv2.circle(color_warp,(lines['left_line'].allx[idx], pt), 2, (255,0,0), -1)
+        
+        for idx,pt in enumerate(lines['right_line'].ally):
+            #cv2.circle(img,(447,63), 63, (0,0,255), -1)
+            cv2.circle(color_warp,(lines['right_line'].allx[idx], pt), 2, (0,0,255), -1)
+        
+        #get the radius curvature
+        left_curverad = self.__get_curvature(lines['left_line'].allx, lines['left_line'].ally, lines['left_line'].best_fit)
+        right_curverad = self.__get_curvature(lines['right_line'].allx, lines['right_line'].ally, lines['right_line'].best_fit)
+        left_text = 'Left Curvature Radius: ' + str(np.around(left_curverad,2)) + 'm'
+        right_text = 'Right Curvature Radius: ' + str(np.around(right_curverad,2)) + 'm'
+        
+        #get the distance from the center
+        center_diff = self.__get_center_difference(undist, lines)
+        if center_diff < 0:
+            center_diff_text = 'Vehicle Position: ' + str(np.around(np.absolute(center_diff),2)) + 'm left of center'
+        else:
+            center_diff_text = 'Vehicle Position: ' + str(np.around(center_diff,2)) + 'm right of center'
+            
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        cv2.putText(undist,left_text,(10,50), font, 1,(255,255,255),2,cv2.LINE_AA)
+        cv2.putText(undist,right_text,(10,100), font, 1,(255,255,255),2,cv2.LINE_AA)
+        cv2.putText(undist,center_diff_text,(10,150), font, 1,(255,255,255),2,cv2.LINE_AA)
+
+        # Warp the blank back to original image space using inverse perspective matrix (Minv)
+        newwarp = cv2.warpPerspective(color_warp, Minv, (img.shape[1], img.shape[0])) 
+        # Combine the result with the original image
+        result = cv2.addWeighted(undist, 1, newwarp, 0.3, 0)
+        
+        return result
 
 
  
@@ -160,68 +280,121 @@ class ImageThresholder:
 
     def get_thresholded_image(self, rgb):
         self.rgb = rgb
-        self.thresh = np.zeros((self.rgb.shape[0], self.rgb.shape[1]), dtype=np.uint8)
         self.__generate_colors_spaces()
-        self.__add_yellow_pixels()
-        self.__add_white_pixels()
-        self.__add_sobel_thresholds()
-        self.__ignore_shadows()
+        gradx = self.__abs_sobel_thresh(orient='x', thresh=(10, 100))
+        grady = self.__abs_sobel_thresh(orient='y', thresh=(5, 250))
+        mag_binary = self.__mag_threshold(mag_thresh=(5, 100))
+        dir_binary = self.__dir_threshold(dir_thresh=(0, np.pi/2))
+        s_binary = self.__color_threshold_hsv("s", (120,255))
+        v_binary = self.__color_threshold_yuv("v", (0,105))
+        r_binary = self.__color_threshold_rgb("r", (230,255))
+        self.thresh = np.zeros_like(dir_binary)
+
+        #Combine results
+        self.thresh[((gradx == 1) & (grady == 1)) | ((mag_binary == 1)
+               & (dir_binary == 1)) & ((s_binary == 1))
+               | ((v_binary ==1) | (r_binary == 1))] = 1
+
         return self.thresh
 
-    def __add_yellow_pixels(self):
-        """Yellow pixels are identified through a band-pass filter in the HSV
-        (hue, saturation, value/brightness) space.
-        """
-        lower  = np.array([ 0, 80, 200])
-        upper = np.array([ 40, 255, 255])
-        yellows = np.array(cv2.inRange(self.hsv, lower, upper))
-        self.thresh[yellows > 0] = 1
+    def __color_threshold_hsv(self, channel="s", thresh=(170,255)):
+        """Band pass filter for HSV colour space"""
 
-    def __add_white_pixels(self):
-        """White filtering method from "Real-Time Lane Detection and Rear-End 
-        Collision Warning SystemOn A Mobile Computing Platform", Tang et.al., 2015
-        """
-        y = self.yuv[:,:,0]
-        whites = np.zeros_like(y)
-        bits = np.where(y  > 100)  # was 175
-        whites[bits] = 1
+        h, s, v = cv2.split(self.hsv)
 
-        # Define a filter kernel to find the white pixels.
-        kernel = np.ones((11,11),np.float32)/(1-11*11)
-        kernel[5,5] = 1.0
-        mask2 = cv2.filter2D(y,-1,kernel)
-        whites[mask2 < 5] = 0
-        self.thresh = self.thresh | whites 
+        if channel == "h":
+            target_channel = h
+        elif channel == "l":
+            target_channel = s
+        else:
+            target_channel = v
 
-    def __add_sobel_thresholds(self):
-        """The green channel in an rgb image, and the gray image are 
-        good candidates for finding edges. As talked about in class,
-        and by experimentaion.
-        """
-        green = self.__abs_sobel_thresh(self.rgb[:,:,1])
-        shadows = self.__abs_sobel_thresh(self.gray, thresh_min=10, thresh_max=64)
-        self.thresh = self.thresh | green | shadows
+        binary_output = np.zeros_like(target_channel)
+        binary_output[(target_channel >= thresh[0]) & (target_channel <= thresh[1])] = 1
+        
+        return binary_output
 
-    def __abs_sobel_thresh(self, gray, orient='x', thresh_min=20, thresh_max=100):
+
+    def __color_threshold_rgb(self, channel="r", thresh=(170,255)):
+        """Band pass filter for RGB colour space"""
+
+        r,g,b = cv2.split(self.rgb)
+        
+        if channel == "r":
+            target_channel = r
+        elif channel == "g":
+            target_channel = g
+        else:
+            target_channel = b
+
+        binary_output = np.zeros_like(target_channel)
+        binary_output[(target_channel >= thresh[0]) & (target_channel <= thresh[1])] = 1
+        
+        return binary_output
+
+    def __color_threshold_yuv(self, channel="v", thresh=(0,255)):
+        """Band pass filter for YUV colour space"""
+
+        y, u, v  = cv2.split(self.yuv)
+        
+        if channel == "y":
+            target_channel = y
+        elif channel == "u":
+            target_channel = u
+        else:
+            target_channel = v
+
+        binary_output = np.zeros_like(target_channel)
+        binary_output[(target_channel >= thresh[0]) & (target_channel <= thresh[1])] = 1
+        
+        return binary_output
+
+
+    def __abs_sobel_thresh(self, orient='x', thresh=(0,255)):
         """Apply a Sobel filter to find edges, scale the results
         from 1-255 (0-100%), then use a band-pass filter to create a mask
         for values in the range [thresh_min, thresh_max].
         """
-        sobel = cv2.Sobel(gray, cv2.CV_64F, (orient=='x'), (orient=='y'))
+        sobel = cv2.Sobel(self.gray, cv2.CV_64F, (orient=='x'), (orient=='y'))
         abs_sobel = np.absolute(sobel)
         max_sobel = max(1,np.max(abs_sobel))
         scaled_sobel = np.uint8(255*abs_sobel/max_sobel)
         binary_output = np.zeros_like(scaled_sobel)
-        binary_output[(scaled_sobel >= thresh_min) & (scaled_sobel <= thresh_max)] = 1
+        binary_output[(scaled_sobel >= thresh[0]) & (scaled_sobel <= thresh[1])] = 1
         return binary_output
 
-    def __ignore_shadows(self):
-        """Find brighter spots on the road and ignore the really dark areas.
+
+    def __mag_threshold(self, sobel_kernel=3, mag_thresh=(0, 255)):
         """
-        bits = np.zeros_like(self.gray)
-        thresh = np.mean(self.gray)
-        bits[self.gray > thresh] = 1
-        self.thresh = self.thresh & bits
+        Function that takes image, kernel size, and threshold and returns
+        magnitude of the gradient
+        """
+
+        sobelx = cv2.Sobel(self.gray, cv2.CV_64F, 1, 0, ksize=sobel_kernel)
+        sobely = cv2.Sobel(self.gray, cv2.CV_64F, 0, 1, ksize=sobel_kernel)
+        gradmag = np.sqrt(sobelx**2 + sobely**2)
+        scale_factor = np.max(gradmag)/255
+        gradmag = (gradmag/scale_factor).astype(np.uint8)
+        binary_output = np.zeros_like(gradmag)
+        binary_output[(gradmag >= mag_thresh[0]) & (gradmag <= mag_thresh[1])] = 1
+
+        return binary_output
+
+
+    def __dir_threshold(self, sobel_kernel=3, dir_thresh=(0, np.pi/2)):
+        """
+        Function to threshold gradient direction in an image for a given 
+        range and Sobel kernel.
+        """
+
+        sobelx = cv2.Sobel(self.gray, cv2.CV_64F, 1, 0, ksize=sobel_kernel)
+        sobely = cv2.Sobel(self.gray, cv2.CV_64F, 0, 1, ksize=sobel_kernel)
+        absgraddir = np.arctan2(np.absolute(sobely), np.absolute(sobelx))
+        binary_output =  np.zeros_like(absgraddir)
+        binary_output[(absgraddir >= dir_thresh[0]) & (absgraddir <= dir_thresh[1])] = 1
+
+        return binary_output
+
 
 
 

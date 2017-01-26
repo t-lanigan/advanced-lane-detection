@@ -22,33 +22,123 @@ class LaneHistogramFitter:
         # Feed these to our makers who will figure out if they're good and
         # compute a moving average, which we'll use for guidance.
         #
-        edges = img
-        h = self.smooth(np.mean(edges[np.int(edges.shape[0]*self.g.n_hist_cutoff):,:], axis=0))
-        b = self.lane_boundaries(h)
-        self.pixels, left_fit, right_fit = self.fit_line_to_frame(b)
-        self.left.update_history(left_fit)
-        self.right.update_history(right_fit)
 
-    def smooth(self, x, window_len=32):
-        # We apply a 32x32 hanning filter to smooth our noisy 1-D
-        # histogram of pixel intensity.  This helps find peaks for lanes.
-        w = np.hanning(window_len)
-        s = np.r_[x[window_len-1:0:-1],x,x[-1:-window_len:-1]]
-        return np.convolve(w/w.sum(),s,mode='valid')
-
-    def lane_boundaries(self, h):
-        # Given an intensity histogram h, find the peaks on left an right,
-        # then the window of intensity on either side of the peak that exceeds
-        # a noise threshold.
-        b = LaneBoundaries()
-        midpoint = int(len(h)/2)
-        b.l_lo, b.l_hi = self.g.peak_window(h, np.argmax(h[0:midpoint]))
-        b.r_lo, b.r_hi = self.g.peak_window(h, midpoint+np.argmax(h[midpoint:]))
-        return b
+def myPipeline(img):
+    ksize = 3
+    gradx = abs_sobel_thresh(img, orient='x', sobel_kernel=ksize, thresh=(10, 100))
+    grady = abs_sobel_thresh(img, orient='y', sobel_kernel=ksize, thresh=(5, 250))
+    mag_binary = mag_threshold(img, sobel_kernel=ksize, mag_thresh=(5, 100))
+    dir_binary = dir_threshold(img, sobel_kernel=ksize, thresh=(0, np.pi/2))
+    s_binary = color_threshold_hsv(img, "s", (120,255))
+    v_binary = color_threshold_yuv(img,"v", (0,105))
+    r_binary = color_threshold_rgb(img,"r", (230,255))
+    result = np.zeros_like(dir_binary)
+    result[((gradx == 1) & (grady == 1)) | ((mag_binary == 1) & (dir_binary == 1)) & ((s_binary == 1)) | ((v_binary ==1) | (r_binary == 1))] = 1
+    return result
 
 
 
 
+
+# Function that takes image, kernel size, and threshold and returns
+# magnitude of the gradient
+def mag_threshold(img, sobel_kernel=3, mag_thresh=(0, 255)):
+    # Convert to grayscale
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    # Take both Sobel x and y gradients
+    sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=sobel_kernel)
+    sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=sobel_kernel)
+    # Calculate the gradient magnitude
+    gradmag = np.sqrt(sobelx**2 + sobely**2)
+    # Rescale to 8 bit
+    scale_factor = np.max(gradmag)/255
+    gradmag = (gradmag/scale_factor).astype(np.uint8)
+    # Create a binary image of ones where threshold is met, zeros otherwise
+    binary_output = np.zeros_like(gradmag)
+    binary_output[(gradmag >= mag_thresh[0]) & (gradmag <= mag_thresh[1])] = 1
+
+    # Return the binary image
+    return binary_output
+
+#function to threshold HSV color spectrum in an image for a given range
+def color_threshold_hsv(img, channel="s", thresh=(170,255)):
+    img = np.copy(img)
+    # Convert to HSV color space and separate the V channel
+    hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HLS).astype(np.float)
+    h_channel = hsv[:,:,0]
+    l_channel = hsv[:,:,1]
+    s_channel = hsv[:,:,2]
+    
+    if channel == "h":
+        target_channel = h_channel
+    elif channel == "l":
+        target_channel = l_channel
+    else:
+        target_channel = s_channel
+    
+    # Threshold color channel
+    binary_output = np.zeros_like(target_channel)
+    binary_output[(target_channel >= thresh[0]) & (target_channel <= thresh[1])] = 1
+    
+    return binary_output
+
+#function to threshold RGB color spectrum in an image for a given range
+def color_threshold_rgb(img, channel="r", thresh=(170,255)):
+    img = np.copy(img)
+    r_channel = img[:,:,0]
+    g_channel = img[:,:,1]
+    b_channel = img[:,:,2]
+    
+    if channel == "r":
+        target_channel = r_channel
+    elif channel == "g":
+        target_channel = g_channel
+    else:
+        target_channel = b_channel
+    
+    # Threshold color channel
+    binary_output = np.zeros_like(target_channel)
+    binary_output[(target_channel >= thresh[0]) & (target_channel <= thresh[1])] = 1
+    
+    return binary_output
+    
+#function to threshold HSV color spectrum in an image for a given range
+def color_threshold_yuv(img, channel="v", thresh=(0,255)):
+    img = np.copy(img)
+    # Convert to YUV color space and separate the V channel
+    yuv = cv2.cvtColor(img, cv2.COLOR_RGB2YUV).astype(np.float)
+    y_channel = yuv[:,:,0]
+    u_channel = yuv[:,:,1]
+    v_channel = yuv[:,:,2]
+    
+    if channel == "y":
+        target_channel = y_channel
+    elif channel == "u":
+        target_channel = u_channel
+    else:
+        target_channel = v_channel
+    
+    # Threshold color channel
+    binary_output = np.zeros_like(target_channel)
+    binary_output[(target_channel >= thresh[0]) & (target_channel <= thresh[1])] = 1
+    
+    return binary_output
+
+# Function to threshold gradient direction in an image for a given range and Sobel kernel
+def dir_threshold(img, sobel_kernel=3, thresh=(0, np.pi/2)):
+    # Grayscale
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    # Calculate the x and y gradients
+    sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=sobel_kernel)
+    sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=sobel_kernel)
+    # Take the absolute value of the gradient direction,
+    # apply a threshold, and create a binary image result
+    absgraddir = np.arctan2(np.absolute(sobely), np.absolute(sobelx))
+    binary_output =  np.zeros_like(absgraddir)
+    binary_output[(absgraddir >= thresh[0]) & (absgraddir <= thresh[1])] = 1
+
+    # Return the binary image
+    return binary_output
 
 
 

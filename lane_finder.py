@@ -44,8 +44,8 @@ class GlobalObjects:
 
 
     def __set_hyper_parameters(self):
-        self.img_size   = (640, 360) # (x,y) values for resized img
-
+        self.img_size   = (1280, 720) # (x,y) values for resized img (cv2 uses this)
+        self.img_shape  = (self.img_size[1], self.img_size[0]) # (y,x) As numpy spits out
         return
 
     def __set_kernels(self):
@@ -57,19 +57,27 @@ class GlobalObjects:
         # The src points draw a persepective trapezoid, the dst points draw
         # them as a square.  M transforms x,y from trapezoid to square for
         # a birds-eye view.  M_inv does the inverse.
-        src = np.float32(((500, 548), (858, 548), (1138, 712), (312, 712)))*0.5
-        dst = np.float32(((350, 600), (940, 600), (940, 720), (350, 720)))*0.5
+        # src = np.float32(((500, 548), (858, 548), (1138, 712), (312, 712)))
+        src = np.float32([[(.42 * self.img_shape[1],.65 * self.img_shape[0] ),
+                           (.58 * self.img_shape[1], .65 * self.img_shape[0]),
+                           (0 * self.img_shape[1],self.img_shape[0]),
+                           (1 * self.img_shape[1], self.img_shape[0])]])
+
+        dst = np.float32([[0,0],
+                          [self.img_shape[1],0],
+                          [0,self.img_shape[0]],
+                          [self.img_shape[1],self.img_shape[0]]])
+
         self.M = cv2.getPerspectiveTransform(src, dst)
         self.M_inv = cv2.getPerspectiveTransform(dst, src)
-        self.dsize = (640,360)
 
     def __set_mask_regions(self):
         # We clip the bottom of the birds-eye view to eliminate reflections
         # from the car dashboard.  The roi_clip cuts a trapezoid from a normal
         # image.
-        self.bottom_clip = np.int32(np.int32([[[60,0], [1179,0], [1179,650], [60,650]]])*0.5)
+        self.bottom_clip = np.int32(np.int32([[[60,0], [1179,0], [1179,650], [60,650]]]))
         self.roi_clip =  np.int32(np.int32([[[640, 425], [1179,550], [979,719],
-                              [299,719], [100, 550], [640, 425]]])*0.5)
+                              [299,719], [100, 550], [640, 425]]]))
 
 
 
@@ -98,11 +106,11 @@ class LaneFinder(object):
         enhanced    = self.__enhance_image(undistorted, self.g)
         warped      = self.__warp_image_to_biv(enhanced)
         thresholded = self.__threshold_image(warped)
-        bot_masked  = self.__mask_region(thresholded, self.g.bottom_clip)
+        # bot_masked  = self.__mask_region(thresholded, self.g.bottom_clip)
 
 
       
-        result = bot_masked
+        result = warped
         
         return result
 

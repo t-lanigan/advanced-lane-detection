@@ -1,3 +1,4 @@
+
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
@@ -29,6 +30,31 @@ class Line:
         self.allx = None  
         #y values for detected line pixels
         self.ally = None
+
+        #Conversions from pixels to real measurements
+        self.ym_per_pix = 30/720
+        self.xm_per_pix = 3.7/700
+
+    def get_curvature(self, which_fit='best'):
+        
+        if which_fit == 'best':
+            fit = self.best_fit
+        else:
+            fit = self.current_fit
+
+        y_eval = np.max(self.ally)
+
+        # Define conversions in x and y from pixels space to meters
+        ym_per_pix = 30/720 # meters per pixel in y dimension
+        xm_per_pix = 3.7/700 # meteres per pixel in x dimension
+
+        fit_cr = np.polyfit(self.ally*self.ym_per_pix, 
+                            self.allx*self.xm_per_pix, 2)
+        
+        #Radius of curvature formula.
+        self.radius_of_curvature = ((1 + (2*fit_cr[0]*y_eval + fit_cr[1])**2)**1.5) \
+                                     /np.absolute(2*fit_cr[0])
+        return self.radius_of_curvature
 
 
 class HistogramLineFitter:
@@ -156,6 +182,25 @@ class HistogramLineFitter:
             
         return line
 
+    def __check_detection(self, prev_line, next_line):
+        """
+        Checks two lines to see if they have similar curvature.
+        """
+
+        left_curvature = prev_line.get_curvature(which_fit='current')
+        right_curvature = next_line.get_curvature(which_fit='current')
+        # Checking that they are separated by approximately the right distance horizontally
+        left_x = prev_line.recent_xfitted[0][0]
+        right_x = next_line.recent_xfitted[0][0]
+        if (np.absolute(left_x - right_x) > 1000) | (np.absolute(left_curvature - right_curvature) > 100): #in pixels, not meters
+            prev_line.detected = False
+            next_line.detected = False
+            return False
+
+        prev_line.detected = True #in case these are different lines that are being compared
+        next_line.detected = True
+        return True
+
 
 class LaneDrawer:
     """
@@ -191,8 +236,9 @@ class LaneDrawer:
             cv2.circle(color_warp,(lines['right_line'].allx[idx], pt), 2, (0,0,255), -1)
         
         #get the radius curvature
-        left_curverad = self.__get_curvature(lines['left_line'].allx, lines['left_line'].ally, lines['left_line'].best_fit)
-        right_curverad = self.__get_curvature(lines['right_line'].allx, lines['right_line'].ally, lines['right_line'].best_fit)
+        left_curverad = lines['left_line'].get_curvature(which_fit='best')
+        right_curverad = lines['right_line'].get_curvature(which_fit='best')
+
         left_text = 'Left Curvature Radius: ' + str(np.around(left_curverad,2)) + 'm'
         right_text = 'Right Curvature Radius: ' + str(np.around(right_curverad,2)) + 'm'
         
@@ -214,46 +260,6 @@ class LaneDrawer:
         result = cv2.addWeighted(undist, 1, newwarp, 0.3, 0)
         
         return result
-
-    def __check_detection(self, prev_line, next_line):
-        # Checking that they have similar curvature
-        left_curvature = getCurvature(prev_line.allx, prev_line.ally, prev_line.current_fit )
-        right_curvature = getCurvature(next_line.allx, next_line.ally, next_line.current_fit)
-        # Checking that they are separated by approximately the right distance horizontally
-        left_x = prev_line.recent_xfitted[0][0]
-        right_x = next_line.recent_xfitted[0][0]
-        if (np.absolute(left_x - right_x) > 1000) | (np.absolute(left_curvature - right_curvature) > 100): #in pixels, not meters
-            prev_line.detected = False
-            next_line.detected = False
-            return False
-
-        prev_line.detected = True #in case these are different lines that are being compared
-        next_line.detected = True
-        return True
-
-        # Define y-value where we want radius of curvature
-    # I'll choose the maximum y-value, corresponding to the bottom of the image
-    def __get_curvature(self, line_x, line_y, fit):
-        
-        y_eval = np.max(line_y)
-        curverad = ((1 + (2*fit[0]*y_eval + fit[1])**2)**1.5) \
-                                     /np.absolute(2*fit[0])
-        
-        # Define conversions in x and y from pixels space to meters
-        ym_per_pix = 30/720 # meters per pixel in y dimension
-        xm_per_pix = 3.7/700 # meteres per pixel in x dimension
-
-        fit_cr = np.polyfit(line_y*ym_per_pix, line_x*xm_per_pix, 2)
-        
-        curverad = ((1 + (2*fit_cr[0]*y_eval + fit_cr[1])**2)**1.5) \
-                                     /np.absolute(2*fit_cr[0])
-        
-        # Now our radius of curvature is in meters
-        #print(left_curverad, 'm', right_curverad, 'm')
-        # Example values: 3380.7 m    3189.3 m
-
-        return curverad
-        # Example values: 1163.9    1213.7
         
     def __get_center_difference(self, img,lines):
         #midpoint of the lines (half the polyfill width)

@@ -31,9 +31,8 @@ class GlobalObjects:
         self.__set_folders()
         self.__set_hyper_parameters()
         self.__set_perspective()
-        self.__set_mask_regions()
         self.__set_kernels()
-
+        self.__set_mask_regions()
 
     def __set_folders(self):
         # Use one slash for paths.
@@ -54,10 +53,11 @@ class GlobalObjects:
 
 
     def __set_perspective(self):
-        # The src points draw a persepective trapezoid, the dst points draw
-        # them as a square.  M transforms x,y from trapezoid to square for
-        # a birds-eye view.  M_inv does the inverse.
-        # src = np.float32(((500, 548), (858, 548), (1138, 712), (312, 712)))
+        """The src points draw a persepective trapezoid, the dst points draw
+        them as a square.  M transforms x,y from trapezoid to square for
+        a birds-eye view.  M_inv does the inverse.
+        """
+
         src = np.float32([[(.42 * self.img_shape[1],.65 * self.img_shape[0] ),
                            (.58 * self.img_shape[1], .65 * self.img_shape[0]),
                            (0 * self.img_shape[1],self.img_shape[0]),
@@ -72,13 +72,11 @@ class GlobalObjects:
         self.M_inv = cv2.getPerspectiveTransform(dst, src)
 
     def __set_mask_regions(self):
-        # We clip the bottom of the birds-eye view to eliminate reflections
-        # from the car dashboard.  The roi_clip cuts a trapezoid from a normal
-        # image.
+        """These are verticies used for clipping the image.
+        """
         self.bottom_clip = np.int32(np.int32([[[60,0], [1179,0], [1179,650], [60,650]]]))
         self.roi_clip =  np.int32(np.int32([[[640, 425], [1179,550], [979,719],
                               [299,719], [100, 550], [640, 425]]]))
-
 
 
 class LaneFinder(object):
@@ -93,7 +91,8 @@ class LaneFinder(object):
         self.g             = GlobalObjects()        
         self.thresholder   = tools.ImageThresholder()
         self.distCorrector = tools.DistortionCorrector(self.g.camera_cal_folder)
-        self.histFitter    = tools.LaneHistogramFitter()
+        self.histFitter    = tools.HistogramLineFitter()
+        self.laneDrawer    = tools.LaneDrawer()
         self.leftLane      = tools.Line()
         self.rightLane     = tools.Line()
 
@@ -107,16 +106,25 @@ class LaneFinder(object):
         undistorted = self.__correct_distortion(resized)
         warped      = self.__warp_image_to_biv(undistorted)
         thresholded = self.__threshold_image(warped)
-
-        leftline    = self.histFitter.detect_lines(thresholded, self.leftLane, 'left')
-        rightline   = self.histFitter.detect_lines(thresholded, self.rightLane, 'right')
-        lines       = {'left_line': leftline, 'right_line': rightline }
-        result      = self.histFitter.draw_lanes(undistorted, thresholded, lines, self.g.M_inv)
-
+        lines       = self.__get_lane_lines(thresholded)
+        result      = self.__draw_lane_lines(undistorted, thresholded)
         enhanced    = self.__enhance_image(result)
-      
-        
+             
         return enhanced
+
+    def __draw_lane_lines(self, undistorted, thresholded):
+
+        lines = {'left_line': self.leftLane,
+                 'right_line': self.rightLane }
+
+        return self.laneDrawer.draw_lanes(undistorted, thresholded, lines, self.g.M_inv)
+
+    def __get_lane_lines(self, img):
+
+        self.leftLane    = self.histFitter.get_line(img, self.leftLane, 'left')
+        self.rightLane   = self.histFitter.get_line(img, self.rightLane, 'right')
+
+        return True
 
     def __mask_region(self, img, vertices):
         """Masks a region specified by clockwise vertices.

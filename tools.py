@@ -31,13 +31,13 @@ class Line:
         self.ally = None
 
 
-class LaneHistogramFitter:
+class HistogramLineFitter:
 
     def __init__(self):
 
         return
 
-    def detect_lines(self, img, line, direction="left"):
+    def get_line(self, img, line, direction="left"):
 
         #bigger numbers create smaller windows as it is calculated as a proportion to the img height
         winWidth = 25
@@ -156,6 +156,65 @@ class LaneHistogramFitter:
             
         return line
 
+
+class LaneDrawer:
+    """
+    Takes in lane lines, a warped image and an undistorted image and draws the lanes with a 
+    cv2.fillPoly
+    """ 
+    def __init__(self):
+        return
+
+    def draw_lanes(self, undist, warped, lines, Minv):
+
+        undist = np.copy(undist)
+        img = np.copy(warped)
+        # Create an image to draw the lines on
+        warp_zero = np.zeros_like(warped).astype(np.uint8)
+        color_warp = np.dstack((warp_zero, warp_zero, warp_zero))
+
+        # Recast the x and y points into usable format for cv2.fillPoly()
+        pts_left = np.array([np.transpose(np.vstack([lines['left_line'].allx, lines['left_line'].ally]))])
+        pts_right = np.array([np.flipud(np.transpose(np.vstack([lines['right_line'].allx, lines['right_line'].ally])))])
+        pts = np.hstack((pts_left, pts_right))
+        
+        # Draw the lane onto the warped blank image
+        cv2.fillPoly(color_warp, np.int_([pts]), (0,255, 0))
+        
+        #Draw the points on the image
+        for idx,pt in enumerate(lines['left_line'].ally):
+            #cv2.circle(img,(447,63), 63, (0,0,255), -1)
+            cv2.circle(color_warp,(lines['left_line'].allx[idx], pt), 2, (255,0,0), -1)
+        
+        for idx,pt in enumerate(lines['right_line'].ally):
+            #cv2.circle(img,(447,63), 63, (0,0,255), -1)
+            cv2.circle(color_warp,(lines['right_line'].allx[idx], pt), 2, (0,0,255), -1)
+        
+        #get the radius curvature
+        left_curverad = self.__get_curvature(lines['left_line'].allx, lines['left_line'].ally, lines['left_line'].best_fit)
+        right_curverad = self.__get_curvature(lines['right_line'].allx, lines['right_line'].ally, lines['right_line'].best_fit)
+        left_text = 'Left Curvature Radius: ' + str(np.around(left_curverad,2)) + 'm'
+        right_text = 'Right Curvature Radius: ' + str(np.around(right_curverad,2)) + 'm'
+        
+        #get the distance from the center
+        center_diff = self.__get_center_difference(undist, lines)
+        if center_diff < 0:
+            center_diff_text = 'Vehicle Position: ' + str(np.around(np.absolute(center_diff),2)) + 'm left of center'
+        else:
+            center_diff_text = 'Vehicle Position: ' + str(np.around(center_diff,2)) + 'm right of center'
+            
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        cv2.putText(undist,left_text,(10,50), font, 1,(255,255,255),2,cv2.LINE_AA)
+        cv2.putText(undist,right_text,(10,100), font, 1,(255,255,255),2,cv2.LINE_AA)
+        cv2.putText(undist,center_diff_text,(10,150), font, 1,(255,255,255),2,cv2.LINE_AA)
+
+        # Warp the blank back to original image space using inverse perspective matrix (Minv)
+        newwarp = cv2.warpPerspective(color_warp, Minv, (img.shape[1], img.shape[0])) 
+        # Combine the result with the original image
+        result = cv2.addWeighted(undist, 1, newwarp, 0.3, 0)
+        
+        return result
+
     def __check_detection(self, prev_line, next_line):
         # Checking that they have similar curvature
         left_curvature = getCurvature(prev_line.allx, prev_line.ally, prev_line.current_fit )
@@ -210,58 +269,6 @@ class LaneHistogramFitter:
         lines['right_line'].line_base_pos = result
         return result
         
-
-    def draw_lanes(self, undist, warped, lines, Minv):
-
-        undist = np.copy(undist)
-        img = np.copy(warped)
-        # Create an image to draw the lines on
-        warp_zero = np.zeros_like(warped).astype(np.uint8)
-        color_warp = np.dstack((warp_zero, warp_zero, warp_zero))
-
-        # Recast the x and y points into usable format for cv2.fillPoly()
-        pts_left = np.array([np.transpose(np.vstack([lines['left_line'].allx, lines['left_line'].ally]))])
-        pts_right = np.array([np.flipud(np.transpose(np.vstack([lines['right_line'].allx, lines['right_line'].ally])))])
-        pts = np.hstack((pts_left, pts_right))
-        
-        # Draw the lane onto the warped blank image
-        cv2.fillPoly(color_warp, np.int_([pts]), (0,255, 0))
-        
-        #Draw the points on the image
-        for idx,pt in enumerate(lines['left_line'].ally):
-            #cv2.circle(img,(447,63), 63, (0,0,255), -1)
-            cv2.circle(color_warp,(lines['left_line'].allx[idx], pt), 2, (255,0,0), -1)
-        
-        for idx,pt in enumerate(lines['right_line'].ally):
-            #cv2.circle(img,(447,63), 63, (0,0,255), -1)
-            cv2.circle(color_warp,(lines['right_line'].allx[idx], pt), 2, (0,0,255), -1)
-        
-        #get the radius curvature
-        left_curverad = self.__get_curvature(lines['left_line'].allx, lines['left_line'].ally, lines['left_line'].best_fit)
-        right_curverad = self.__get_curvature(lines['right_line'].allx, lines['right_line'].ally, lines['right_line'].best_fit)
-        left_text = 'Left Curvature Radius: ' + str(np.around(left_curverad,2)) + 'm'
-        right_text = 'Right Curvature Radius: ' + str(np.around(right_curverad,2)) + 'm'
-        
-        #get the distance from the center
-        center_diff = self.__get_center_difference(undist, lines)
-        if center_diff < 0:
-            center_diff_text = 'Vehicle Position: ' + str(np.around(np.absolute(center_diff),2)) + 'm left of center'
-        else:
-            center_diff_text = 'Vehicle Position: ' + str(np.around(center_diff,2)) + 'm right of center'
-            
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        cv2.putText(undist,left_text,(10,50), font, 1,(255,255,255),2,cv2.LINE_AA)
-        cv2.putText(undist,right_text,(10,100), font, 1,(255,255,255),2,cv2.LINE_AA)
-        cv2.putText(undist,center_diff_text,(10,150), font, 1,(255,255,255),2,cv2.LINE_AA)
-
-        # Warp the blank back to original image space using inverse perspective matrix (Minv)
-        newwarp = cv2.warpPerspective(color_warp, Minv, (img.shape[1], img.shape[0])) 
-        # Combine the result with the original image
-        result = cv2.addWeighted(undist, 1, newwarp, 0.3, 0)
-        
-        return result
-
-
  
 class ImageThresholder:
     """

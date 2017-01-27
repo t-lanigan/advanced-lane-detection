@@ -2,7 +2,6 @@
 Udacity Self Driving Car Nanodegree
 
 Project 4 - Advanced Lane Finding
-Advanced Lane Finding
 
 ---------
 Tyler Lanigan
@@ -110,7 +109,8 @@ class LaneFinder(object):
         result      = self.__draw_lane_lines(undistorted, thresholded)
         enhanced    = self.__enhance_image(result)
              
-        return enhanced
+        return result
+
 
     def __draw_lane_lines(self, undistorted, thresholded):
 
@@ -127,8 +127,10 @@ class LaneFinder(object):
         return True
 
     def __mask_region(self, img, vertices):
-        """Masks a region specified by clockwise vertices.
         """
+        Masks a region specified by clockwise vertices.
+        """
+
         mask = np.zeros_like(img)   
         if len(img.shape) > 2:
             channel_count = img.shape[2]  # i.e. 3 or 4 depending on your image
@@ -144,6 +146,7 @@ class LaneFinder(object):
         Enhances/sharpens the image using a clahe kernel
         See https://en.wikipedia.org/wiki/Adaptive_histogram_equalization
         """
+
         blue = self.g.clahe.apply(img[:,:,0])
         green = self.g.clahe.apply(img[:,:,1])
         red = self.g.clahe.apply(img[:,:,2])
@@ -154,7 +157,7 @@ class LaneFinder(object):
 
     def __resize_image(self, img):
         """
-        Image is resized for memory purposes.
+        Image is resized to the selected size for the project.
         """
         return cv2.resize(img, self.g.img_size, 
                           interpolation = cv2.INTER_CUBIC)
@@ -173,10 +176,12 @@ class LaneFinder(object):
         Run code on the assigned project video.
         """
         vid_output_path = self.g.output_movie_path +  vid_input_path
-        print('Finding lanes for ', vid_input_path)        
-        self.__find_lanes( vid_input_path, vid_output_path)
+        print('Finding lanes for:', vid_input_path)        
 
+        # Load the Video
         clip1 = VideoFileClip(vid_input_path)
+
+        # Feed the video, clip by clip into the pipeline.
         test_clip = clip1.fl_image(self.__image_pipeline)  
         test_clip.write_videofile(vid_output_path, audio=False)
 

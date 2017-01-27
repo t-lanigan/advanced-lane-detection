@@ -7,8 +7,12 @@ import os
 import glob
 from scipy import signal
 
-# From Udacity: Define a class to receive the characteristics of each line detection
+
 class Line:
+    """
+    The line class defines a bunch of characteristics of a single line (lane line)
+    It also includes a function to return the curvature of the line.
+    """
     def __init__(self):
         # was the line detected in the last iteration?
         self.detected = False  
@@ -36,6 +40,9 @@ class Line:
         self.xm_per_pix = 3.7/700
 
     def get_curvature(self, which_fit='best'):
+        """
+        Returns the curvature of the line.
+        """
         
         if which_fit == 'best':
             fit = self.best_fit
@@ -58,6 +65,14 @@ class Line:
 
 
 class HistogramLineFitter:
+    """
+    The HistogramLineFitter uses an adaptive histogram fitting technique to 
+    determine where the lanes most likely are.
+
+    A line is defined as a yellow or white single line in traffic. A lane is a
+
+    combinations of two of the lines.
+    """
 
     def __init__(self):
 
@@ -65,52 +80,74 @@ class HistogramLineFitter:
 
     def get_line(self, img, line, direction="left"):
 
-        #bigger numbers create smaller windows as it is calculated as a proportion to the img height
-        winWidth = 25
-        winHeight = 50 
+        # Window dimensions for histograms sliding window.
+        # see _get_histogram method for ye,ys,xs, and xe explainations
+        
+        win_width = 25
+        win_height = 50 
 
         if not line.detected:
-            histogram = np.sum(img[img.shape[0]*(.5):,0:img.shape[1]], axis=0)
-            #plt.plot(histogram)
 
-            #find two peaks first is the left and last is the right
-            #initial peak
-            peakind = signal.find_peaks_cwt(histogram, np.arange(100,200))
+            xm = img.shape[1]
+            ym = img.shape[0]
+            h = self.__get_histogram(img, ym*(.5), ym, 0, xm)
+
+
+            # Find both peaks
+            peaks = signal.find_peaks_cwt(h, np.arange(100,200))
             if direction == 'left':
-                peak = peakind[0]
+                peak = peaks[0]
             else:
-                peak = peakind[-1]
+                peak = peaks[-1]
             
-            #move the sliding window across and gather the points
+            # Move the sliding window and gather the associated points.
             yvals = []
             xvals = []
             
-            for i in range(winHeight):
-                #peaks may be at the edge so we need to stop at the edge
+            for i in range(win_height):
+
                 if direction == 'left':
-                    if peak < winWidth:
-                        peak = winWidth
+                    if peak < win_width:
+                        peak = win_width
                 else:
-                    if peak >= (img.shape[1] - winWidth):
-                        peak = img.shape[1] - winWidth - 1
+                    if peak >= (xm - win_width):
+                        peak = xm - win_width - 1
                 
-                for yval in range(int(img.shape[0]*((winHeight-i-1)/winHeight)), int(img.shape[0]*((winHeight-i)/winHeight))):
-                    for xval in range(peak-winWidth, peak+winWidth):
+                start_range = int(ym*((win_height-i-1) / win_height))
+                end_range = int(ym*((win_height-i) / win_height))
+
+                for yval in range(start_range , end_range):
+                    for xval in range(peak-win_width, peak + win_width):
                         if img[yval][xval] == 1.0:
                             yvals.append(yval)
                             xvals.append(xval)
-                #find new peaks to move the window accordingly for next iteration
-                #new peaks will be the max in the current window plus the beginning of the window...
+                # Find new peaks to move the window for next iteration
+                # new peaks will be the max in the current window plus 
+                # the beginning of the window...
                 
-                histogram = np.sum(img[img.shape[0]*((winHeight-i-1)/winHeight):img.shape[0]*((winHeight-i)/winHeight),peak-winWidth:peak+winWidth], axis=0)
-                if len(signal.find_peaks_cwt(histogram, np.arange(100,200))) > 0:
-                    peak = np.amax(signal.find_peaks_cwt(histogram, np.arange(100,200))) + (peak-winWidth)
-                else: #look in bigger window
-                    winWidthBig = 100
-                    histogram = np.sum(img[img.shape[0]*((winHeight-i-1)/winHeight):img.shape[0]*((winHeight-i)/winHeight),peak-winWidthBig:peak+winWidthBig], axis=0)
-                    if len(histogram > 0):
-                        if len(signal.find_peaks_cwt(histogram, np.arange(100,200))) > 0:
-                            peak = np.amax(signal.find_peaks_cwt(histogram, np.arange(100,200))) + (peak-winWidthBig)
+                ## See __get_histogram function for explaination.
+                ye = ym *((win_height-i-1)/win_height) 
+                ys = ym *((win_height-i)/win_height)
+                xs = peak-win_width
+                xe = peak+win_width
+
+                h = self.__get_histogram(img, ye, ys, xs, xe)
+                if len(signal.find_peaks_cwt(h, np.arange(100,200))) > 0:
+                    peak = np.amax(signal.find_peaks_cwt(h, np.arange(100,200))) + xs
+                
+                else: 
+                # Look in bigger window
+                    win_width_big = 100
+                    ye = ym*((win_height-i-1)/win_height)
+                    ys = ym*((win_height-i)/win_height)
+                    xs = peak-win_width_big
+                    xe = peak+win_width_big
+
+                    h = self.__get_histogram(img, ye, ys, xs, xe)
+
+                    if len(h > 0):
+                        if len(signal.find_peaks_cwt(h, np.arange(100,200))) > 0:
+                            peak = np.amax(signal.find_peaks_cwt(h, np.arange(100,200))) + xs
 
             yvals = np.asarray(yvals)
             xvals = np.asarray(xvals)
@@ -123,10 +160,10 @@ class HistogramLineFitter:
             
             line.current_fit = fit
             line.best_fit = fit
-            #print(fit)
+
             
             fitx = fit[0]*yvals**2 + fit[1]*yvals + fit[2]
-            #print(fitx)
+
             
             line.recent_xfitted.append(fitx)
             line.bestx = fitx
@@ -140,17 +177,20 @@ class HistogramLineFitter:
             yvals = []
             xvals = []
             
-            for i in range(winHeight):
+            for i in range(win_height):
                 #peaks may be at the edge so we need to stop at the edge
                 if direction == 'left':
-                    if int(peak) < winWidth:
-                        peak = winWidth
+                    if int(peak) < win_width:
+                        peak = win_width
                 else:
-                    if int(peak) >= (img.shape[1] - winWidth):
-                        peak = img.shape[1] - winWidth - 1
+                    if int(peak) >= (xm - win_width):
+                        peak = xm - win_width - 1
                         
-                for yval in range(int(img.shape[0]*((winHeight-i-1)/winHeight)), int(img.shape[0]*((winHeight-i)/winHeight))):
-                    for xval in range(int(peak-winWidth), int(peak+winWidth)):
+                start_range = int(ym*((win_height-i-1)/win_height))
+                end_range = int(xm*((win_height-i)/win_height))
+
+                for yval in range(start_range, end_range):
+                    for xval in range(int(peak-win_width), int(peak+win_width)):
                         if img[yval][xval] == 1.0:
                             yvals.append(yval)
                             xvals.append(xval)
@@ -168,8 +208,8 @@ class HistogramLineFitter:
             line.current_fit = fit
             fitx = fit[0]*yvals**2 + fit[1]*yvals + fit[2]
             
-            isOk = self.__check_detection(prev_line, line)
-            if isOk:
+            is_ok = self.__check_detection(prev_line, line)
+            if is_ok:
                 if len(line.recent_xfitted) > 10:
                     #remove the first element
                     line.recent_xfitted.pop(0)
@@ -177,22 +217,39 @@ class HistogramLineFitter:
                     line.bestx = fitx
                     line.best_fit = fit
             else:
-                #line lost, go back to sliding window
+                # Line lost, go back to sliding window
                 line.detected = false
             
         return line
+
+
+    def __get_histogram(self, img, y_end, y_start, x_start, x_end):
+        """
+        Returns a histogram in the given windows. The images have the y axis pointing down
+        of the z-axis pointing into the screen. The y_end, and x_end are the larger pixel limits
+        of the window of the histogram.
+                        |
+        y_start-->  120 |
+                        |
+        y_end-->   360  |
+                        |___________________________________________
+                                  ^               ^
+                               x_start (200)      x_end (400)
+        """
+
+        return np.sum(img[y_end:y_start , x_start:x_end], axis=0)
 
     def __check_detection(self, prev_line, next_line):
         """
         Checks two lines to see if they have similar curvature.
         """
 
-        left_curvature = prev_line.get_curvature(which_fit='current')
-        right_curvature = next_line.get_curvature(which_fit='current')
+        left_c = prev_line.get_curvature(which_fit='current')
+        right_c = next_line.get_curvature(which_fit='current')
         # Checking that they are separated by approximately the right distance horizontally
         left_x = prev_line.recent_xfitted[0][0]
         right_x = next_line.recent_xfitted[0][0]
-        if (np.absolute(left_x - right_x) > 1000) | (np.absolute(left_curvature - right_curvature) > 100): #in pixels, not meters
+        if (np.absolute(left_x - right_x) > 1000) | (np.absolute(left_c - right_c) > 100):
             prev_line.detected = False
             next_line.detected = False
             return False
@@ -219,22 +276,19 @@ class LaneDrawer:
         color_warp = np.dstack((warp_zero, warp_zero, warp_zero))
 
         # Recast the x and y points into usable format for cv2.fillPoly()
-        pts_left = np.array([np.transpose(np.vstack([lines['left_line'].allx, lines['left_line'].ally]))])
-        pts_right = np.array([np.flipud(np.transpose(np.vstack([lines['right_line'].allx, lines['right_line'].ally])))])
+        pts_left = np.array([np.transpose(np.vstack([lines['left_line'].allx, 
+                                                    lines['left_line'].ally]))])
+
+        pts_right = np.array([np.flipud(np.transpose(np.vstack([lines['right_line'].allx, 
+                                                               lines['right_line'].ally])))])
         pts = np.hstack((pts_left, pts_right))
         
         # Draw the lane onto the warped blank image
         cv2.fillPoly(color_warp, np.int_([pts]), (0,255, 0))
         
-        #Draw the points on the image
-        for idx,pt in enumerate(lines['left_line'].ally):
-            #cv2.circle(img,(447,63), 63, (0,0,255), -1)
-            cv2.circle(color_warp,(lines['left_line'].allx[idx], pt), 2, (255,0,0), -1)
-        
-        for idx,pt in enumerate(lines['right_line'].ally):
-            #cv2.circle(img,(447,63), 63, (0,0,255), -1)
-            cv2.circle(color_warp,(lines['right_line'].allx[idx], pt), 2, (0,0,255), -1)
-        
+        color_warp = self.__draw_lane_pixels(lines['left_line'], color_warp)
+        color_warp = self.__draw_lane_pixels(lines['right_line'], color_warp)
+
         #get the radius curvature
         left_curverad = lines['left_line'].get_curvature(which_fit='best')
         right_curverad = lines['right_line'].get_curvature(which_fit='best')
@@ -260,6 +314,18 @@ class LaneDrawer:
         result = cv2.addWeighted(undist, 1, newwarp, 0.3, 0)
         
         return result
+
+    def __draw_lane_pixels(self, line, img):
+        """
+        Draws the pixels associated with the allx and ally coordinates in the line.
+
+        Change the colour with the tuplet.
+        """
+        for idx,pt in enumerate(line.ally):
+            cv2.circle(img,(line.allx[idx], pt), 2, (255,0,0), -1)
+
+        return img
+
         
     def __get_center_difference(self, img,lines):
         #midpoint of the lines (half the polyfill width)
@@ -407,8 +473,6 @@ class ImageThresholder:
         binary_output[(absgraddir >= dir_thresh[0]) & (absgraddir <= dir_thresh[1])] = 1
 
         return binary_output
-
-
 
 
 class DistortionCorrector:    

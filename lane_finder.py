@@ -106,18 +106,22 @@ class LaneFinder(object):
         warped      = self.__warp_image_to_biv(undistorted)
         thresholded = self.__threshold_image(warped)
         lines       = self.__get_lane_lines(thresholded)
-        result      = self.__draw_lane_lines(undistorted, thresholded)
+        result      = self.__draw_lane_lines(undistorted, thresholded, include_stats=True)
         enhanced    = self.__enhance_image(result)
              
         return result
 
 
-    def __draw_lane_lines(self, undistorted, thresholded):
+    def __draw_lane_lines(self, undistorted, thresholded, include_stats):
 
         lines = {'left_line': self.leftLane,
                  'right_line': self.rightLane }
 
-        return self.laneDrawer.draw_lanes(undistorted, thresholded, lines, self.g.M_inv)
+        return self.laneDrawer.draw_lanes(undistorted,
+                                          thresholded,
+                                          lines,
+                                          self.g.M_inv,
+                                          include_stats)
 
     def __get_lane_lines(self, img):
 

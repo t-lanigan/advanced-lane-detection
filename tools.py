@@ -261,59 +261,89 @@ class HistogramLineFitter:
 
 class LaneDrawer:
     """
-    Takes in lane lines, a warped image and an undistorted image and draws the lanes with a 
-    cv2.fillPoly
-    """ 
+    The tool used to draw lanes on the original image.
+    """
+
     def __init__(self):
+        
+        self.center_offsets = []
+
         return
 
-    def draw_lanes(self, undist, warped, lines, Minv):
-
+    def draw_lanes(self, undist, warped, lines, Minv, include_stats=True):
+        """
+        Takes in an image, a warped image, a Minv, some lines and draws stats and
+        a fillPoly between the lines.
+        """
         undist = np.copy(undist)
         img = np.copy(warped)
         # Create an image to draw the lines on
         warp_zero = np.zeros_like(warped).astype(np.uint8)
         color_warp = np.dstack((warp_zero, warp_zero, warp_zero))
 
-        # Recast the x and y points into usable format for cv2.fillPoly()
-        pts_left = np.array([np.transpose(np.vstack([lines['left_line'].allx, 
-                                                    lines['left_line'].ally]))])
+        pts = self.__get_xy_points(lines)
+        stats = self.__get_lane_stats(lines, undist)
 
-        pts_right = np.array([np.flipud(np.transpose(np.vstack([lines['right_line'].allx, 
-                                                               lines['right_line'].ally])))])
-        pts = np.hstack((pts_left, pts_right))
-        
-        # Draw the lane onto the warped blank image
-        cv2.fillPoly(color_warp, np.int_([pts]), (0,255, 0))
+        # Draw the fill on the color_warp image
+        color_warp = self.__draw_colored_fill(color_warp, np.absolute(stats['center_offset']), pts)
         
         color_warp = self.__draw_lane_pixels(lines['left_line'], color_warp)
         color_warp = self.__draw_lane_pixels(lines['right_line'], color_warp)
-
-        #get the radius curvature
-        left_curverad = lines['left_line'].get_curvature(which_fit='best')
-        right_curverad = lines['right_line'].get_curvature(which_fit='best')
-
-        left_text = 'Left Curvature Radius: ' + str(np.around(left_curverad,2)) + 'm'
-        right_text = 'Right Curvature Radius: ' + str(np.around(right_curverad,2)) + 'm'
-        
-        #get the distance from the center
-        center_diff = self.__get_center_difference(undist, lines)
-        if center_diff < 0:
-            center_diff_text = 'Vehicle Position: ' + str(np.around(np.absolute(center_diff),2)) + 'm left of center'
-        else:
-            center_diff_text = 'Vehicle Position: ' + str(np.around(center_diff,2)) + 'm right of center'
-            
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        cv2.putText(undist,left_text,(10,50), font, 1,(255,255,255),2,cv2.LINE_AA)
-        cv2.putText(undist,right_text,(10,100), font, 1,(255,255,255),2,cv2.LINE_AA)
-        cv2.putText(undist,center_diff_text,(10,150), font, 1,(255,255,255),2,cv2.LINE_AA)
 
         # Warp the blank back to original image space using inverse perspective matrix (Minv)
         newwarp = cv2.warpPerspective(color_warp, Minv, (img.shape[1], img.shape[0])) 
         # Combine the result with the original image
         result = cv2.addWeighted(undist, 1, newwarp, 0.3, 0)
+
+        if include_stats:
+            add_stats = self.__write_statistics(result, stats)
+            return add_stats
+        else:        
+            return result
+
+    def __draw_colored_fill(self, img, offset, pts):
+        """
+        Draws a cv2.fillPoly that is colored according to how far it is away from the 
+        center of the lane. Good for drivers to see how safe autonomous driving is!
+        """
+        limits = [0.35, 0.65]
+        scale_factor = 255/((limits[1] - limits[0])/2)
+        mid = (limits[0] + limits[1])/2
+
+        if offset < mid:
+            r = scale_factor *(offset - limits[0])
+            cv2.fillPoly(img, np.int_([pts]), (r, 255, 0))
+
+        elif (offset > mid) & (offset < limits[1]):
+            g = scale_factor *(limits[1] - offset) 
+            cv2.fillPoly(img, np.int_([pts]), (255, g, 0))
+        else:
+            cv2.fillPoly(img, np.int_([pts]), (255,0, 0))
+
+        return img
         
-        return result
+
+    def __get_offset_average(self, new_offset, n=5):
+        """
+        Finds a running average of the center offsets. 
+        """
+        if len(self.center_offsets) > n:
+            self.center_offsets.append(new_offset)
+            self.center_offsets.pop(o)
+            return (sum(self.center_offsets[-n:]) / n)
+        else:
+            return new_offset
+
+    def __get_xy_points(self, lines):
+        """Recast the x and y points into usable format for cv2.fillPoly()."""
+
+        pts_left = np.array([np.transpose(np.vstack([lines['left_line'].allx,
+                                                     lines['left_line'].ally]))])
+
+        pts_right = np.array([np.flipud(np.transpose(np.vstack([lines['right_line'].allx,
+                                                                lines['right_line'].ally])))])
+        
+        return np.hstack((pts_left, pts_right))
 
     def __draw_lane_pixels(self, line, img):
         """
@@ -325,23 +355,61 @@ class LaneDrawer:
             cv2.circle(img,(line.allx[idx], pt), 2, (255,0,0), -1)
 
         return img
+        
+    def __get_center_offset(self, img, lines):
+        """
+        Returns the distance from the center of the lane, takes in lines dictionary
+        and an image. Computes a running average of the last n values to smooth.
+        """
+        mid_poly = (lines['right_line'].bestx[0] - lines['left_line'].bestx[0]) / 2
 
+        midpoint = img.shape[0] / 2
         
-    def __get_center_difference(self, img,lines):
-        #midpoint of the lines (half the polyfill width)
-        midPoly = (lines['right_line'].bestx[0] - lines['left_line'].bestx[0]) / 2
-        #midpoint of the image (half the image length)
-        midImage = img.shape[0] / 2
-        
-        diffInPix = midImage - midPoly
+        diff_in_pix = midpoint - mid_poly
         #convert to meters
-        xm_per_pix = 3.7/700 # meteres per pixel in x dimension
-        result = diffInPix * xm_per_pix
+        xm_per_pix = 3.7/700
+        result = diff_in_pix * xm_per_pix
+
         lines['left_line'].line_base_pos = result
         lines['right_line'].line_base_pos = result
-        return result
         
- 
+        return self.__get_offset_average(result, n=10)
+        
+    def __get_lane_stats(self, lines, undist):
+        """
+        Returns the statistics for the lane. Takes in lines dictionary and an image.
+        """
+        left_curavature = lines['left_line'].get_curvature(which_fit='best')
+        right_curvature = lines['right_line'].get_curvature(which_fit='best')
+        average_curvature = int((left_curavature + right_curvature) / 2)
+        center_offset = self.__get_center_offset(undist, lines)
+
+        stats = {'average_curve': average_curvature, 
+                 'center_offset': center_offset}
+
+        return stats
+
+    def __write_statistics(self, undist, stats):
+        """
+        Writes the statistics dictionary on the image.
+        """
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        offset = stats['center_offset']
+
+        if offset < 0:
+            offset_text = 'Vehicle is ' + str(np.around(np.absolute(offset),2)) + 'm left of center'
+        else:
+            offset_text = 'Vehicle is ' + str(np.around(offset,2)) + 'm right of center'
+
+        curve_text = 'Road radius of curvature: ' + str(np.around(stats['average_curve'],-1))  +' m' 
+        
+        cv2.putText(undist, curve_text,(10,50), font, 1,(255,255,255),2,cv2.LINE_AA)
+        cv2.putText(undist, offset_text,(10,100), font, 1,(255,255,255),2,cv2.LINE_AA)
+
+        return undist
+
+        
+
 class ImageThresholder:
     """
     The ImageThresholder takes in an rgb image and spits out a thresholded image 
@@ -375,6 +443,7 @@ class ImageThresholder:
                | ((v_binary ==1) | (r_binary == 1))] = 1
 
         return self.thresh
+
 
     def __color_threshold_hsv(self, channel="s", thresh=(170,255)):
         """Band pass filter for HSV colour space"""

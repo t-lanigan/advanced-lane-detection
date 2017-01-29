@@ -128,6 +128,8 @@ The input `rgb` image is converted to the `hsv`, `yuv` color spaces in the `__ge
 
 The final image is a result of all the pixels that were able to pass through the Sobel and color space filtering. The pixels are set to the value of 1, with all other pixels being zero. The final result can be visualized as follows:
 
+![thresholded](./report_images/threshed-small.png)
+
 # Adaptive Histogram Lane Finding
 
 To find the lane lines, a new class called `HistogramLaneFitter` was created in the tools module. This lane fitter takes in a thresholded image as shown in the above section and output a `Line` class that represents either the left lane line or the right lane line. The `Line` class contains a number of attributes, including the coefficients for a parabola that best fits the line, references to `Lines` in previous from and all the pixels associated with the line.
@@ -185,5 +187,5 @@ A hypothetical situation that would cause this pipeline to fail would be a gradi
 
 
 In future work, a checking system that ensures that the lane lines are a certain distance away from each other before marking them as `dectected` would help mitigate this issue.
-![thresholded](./report_images/threshed-small.png)
+
 

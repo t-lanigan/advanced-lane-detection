@@ -5,5 +5,5 @@ __pycache__/
 output_images/
 output_movies/
 *.pyc
-report_images/
 test.py
+report.ipynb

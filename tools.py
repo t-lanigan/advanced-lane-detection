@@ -284,11 +284,12 @@ class LaneDrawer:
         pts = self.__get_xy_points(lines)
         stats = self.__get_lane_stats(lines, undist)
 
+
         # Draw the fill on the color_warp image
         color_warp = self.__draw_colored_fill(color_warp, np.absolute(stats['center_offset']), pts)
         
-        color_warp = self.__draw_lane_pixels(lines['left_line'], color_warp)
-        color_warp = self.__draw_lane_pixels(lines['right_line'], color_warp)
+        color_warp = self.__draw_lane_pixels(lines['left_line'], color_warp, color='red')
+        color_warp = self.__draw_lane_pixels(lines['right_line'], color_warp, color = 'blue')
 
         # Warp the blank back to original image space using inverse perspective matrix (Minv)
         newwarp = cv2.warpPerspective(color_warp, Minv, (img.shape[1], img.shape[0])) 
@@ -306,7 +307,7 @@ class LaneDrawer:
         Draws a cv2.fillPoly that is colored according to how far it is away from the 
         center of the lane. Good for drivers to see how safe autonomous driving is!
         """
-        limits = [0.35, 0.65]
+        limits = [0.45, 0.70]
         scale_factor = 255/((limits[1] - limits[0])/2)
         mid = (limits[0] + limits[1])/2
 
@@ -345,14 +346,18 @@ class LaneDrawer:
         
         return np.hstack((pts_left, pts_right))
 
-    def __draw_lane_pixels(self, line, img):
+    def __draw_lane_pixels(self, line, img, color='red'):
         """
         Draws the pixels associated with the allx and ally coordinates in the line.
 
         Change the colour with the tuplet.
         """
-        for idx,pt in enumerate(line.ally):
-            cv2.circle(img,(line.allx[idx], pt), 2, (255,0,0), -1)
+        if color == 'red':
+            for idx,pt in enumerate(line.ally):
+                cv2.circle(img,(line.allx[idx], pt), 2, (255,0,0), -1)
+        if color == 'blue':
+            for idx,pt in enumerate(line.ally):
+                cv2.circle(img,(line.allx[idx], pt), 2, (0,0,255), -1)            
 
         return img
         
@@ -420,14 +425,14 @@ class ImageThresholder:
     def __init__(self):
         return
 
-    def __generate_colors_spaces(self):
+    def __generate_color_spaces(self):
         self.hsv = cv2.cvtColor(self.rgb, cv2.COLOR_RGB2HSV)
         self.yuv = cv2.cvtColor(self.rgb, cv2.COLOR_RGB2YUV)
         self.gray = cv2.cvtColor(self.rgb, cv2.COLOR_RGB2GRAY)
 
     def get_thresholded_image(self, rgb):
         self.rgb = rgb
-        self.__generate_colors_spaces()
+        self.__generate_color_spaces()
         gradx = self.__abs_sobel_thresh(orient='x', thresh=(10, 100))
         grady = self.__abs_sobel_thresh(orient='y', thresh=(5, 250))
         mag_binary = self.__mag_threshold(mag_thresh=(5, 100))

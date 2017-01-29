@@ -107,8 +107,8 @@ class LaneFinder(object):
         thresholded = self.__threshold_image(warped)
         lines       = self.__get_lane_lines(thresholded)
         result      = self.__draw_lane_lines(undistorted, thresholded, include_stats=True)
-        enhanced    = self.__enhance_image(result)
-             
+        #enhanced    = self.__enhance_image(result)
+
         return result
 
 
@@ -224,7 +224,7 @@ class LaneFinder(object):
                 ax = fig.add_subplot(4,2,i+1)
                 img = mpimg.imread(path)
                 img = self.__image_pipeline(img)
-                plt.imshow(img, cmap='gray')
+                plt.imshow(img)
                 plt.title(path.split('/')[1])
                 ax.xaxis.set_visible(False)
                 ax.yaxis.set_visible(False)
